@@ -1,24 +1,5 @@
 """
 AI Learning Engine for analyzing user interactions and extracting insights
-"""
-
-import re
-import json
-import logging
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple, Any
-from dataclasses import dataclass
-from collections import Counter, defaultdict
-import string
-
-from models import UserInteraction, LearnedFact, UserInsight, LearningResult, InteractionType, LearningConfidence
-
-# Configure logging
-logger = logging.getLogger(__name__)
-
-
-"""
-AI Learning Engine for analyzing user interactions and extracting insights
 Simplified version without heavy ML dependencies
 """
 
