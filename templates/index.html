@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI User Learning System</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 40px;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+
+        .card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+        }
+
+        .card h2 {
+            color: #5a67d8;
+            margin-bottom: 15px;
+            border-bottom: 2px solid #e2e8f0;
+            padding-bottom: 10px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #4a5568;
+        }
+
+        .form-group input,
+        .form-group textarea,
+        .form-group select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s ease;
+        }
+
+        .form-group input:focus,
+        .form-group textarea:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #5a67d8;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #5a67d8, #667eea);
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(90, 103, 216, 0.4);
+        }
+
+        .btn-secondary {
+            background: linear-gradient(135deg, #718096, #4a5568);
+        }
+
+        .btn-danger {
+            background: linear-gradient(135deg, #e53e3e, #c53030);
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        .status {
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+
+        .status.success {
+            background: #c6f6d5;
+            color: #2f855a;
+        }
+
+        .status.error {
+            background: #fed7d7;
+            color: #c53030;
+        }
+
+        .fact-item {
+            background: #f7fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 10px 0;
+        }
+
+        .fact-category {
+            background: #5a67d8;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            margin-right: 10px;
+        }
+
+        .confidence-badge {
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            margin-left: 10px;
+        }
+
+        .confidence-high {
+            background: #c6f6d5;
+            color: #2f855a;
+        }
+
+        .confidence-medium {
+            background: #fef5e7;
+            color: #d69e2e;
+        }
+
+        .confidence-low {
+            background: #fed7d7;
+            color: #c53030;
+        }
+
+        .interaction-item {
+            border-left: 4px solid #5a67d8;
+            padding: 10px 15px;
+            margin: 10px 0;
+            background: #f7fafc;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #718096;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 10px;
+            }
+            
+            .header h1 {
+                font-size: 2rem;
+            }
+            
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🧠 AI User Learning System</h1>
+            <p>Intelligent system that learns about users and adapts to their preferences</p>
+        </div>
+
+        <div class="grid">
+            <!-- User Management Card -->
+            <div class="card">
+                <h2>👤 User Management</h2>
+                <div class="form-group">
+                    <label for="username">Username:</label>
+                    <input type="text" id="username" placeholder="Enter username">
+                </div>
+                <div class="form-group">
+                    <label for="email">Email (optional):</label>
+                    <input type="email" id="email" placeholder="Enter email">
+                </div>
+                <button class="btn" onclick="createUser()">Create User</button>
+                <button class="btn btn-secondary" onclick="loadUser()">Load User</button>
+                
+                <div id="userStatus"></div>
+                <div id="currentUser" style="display: none;">
+                    <h3>Current User</h3>
+                    <div id="userInfo"></div>
+                </div>
+            </div>
+
+            <!-- Interaction Card -->
+            <div class="card">
+                <h2>💬 User Interaction</h2>
+                <div class="form-group">
+                    <label for="interactionType">Interaction Type:</label>
+                    <select id="interactionType">
+                        <option value="message">Message</option>
+                        <option value="preference">Preference</option>
+                        <option value="feedback">Feedback</option>
+                        <option value="behavior">Behavior</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="interactionContent">Content:</label>
+                    <textarea id="interactionContent" rows="4" placeholder="Enter interaction content..."></textarea>
+                </div>
+                <button class="btn" onclick="recordInteraction()">Record Interaction</button>
+                <button class="btn btn-secondary" onclick="triggerLearning()">Trigger Learning</button>
+                
+                <div id="interactionStatus"></div>
+            </div>
+        </div>
+
+        <!-- Learned Facts Card -->
+        <div class="card">
+            <h2>🧠 Learned Facts</h2>
+            <div style="margin-bottom: 20px;">
+                <button class="btn" onclick="loadFacts()">Refresh Facts</button>
+                <button class="btn btn-secondary" onclick="loadFacts('interests')">Interests Only</button>
+                <button class="btn btn-secondary" onclick="loadFacts('behavior')">Behavior Only</button>
+            </div>
+            <div id="factsContainer">
+                <div class="loading">No facts loaded. Create a user and record some interactions first.</div>
+            </div>
+        </div>
+
+        <!-- Recent Interactions Card -->
+        <div class="card">
+            <h2>📝 Recent Interactions</h2>
+            <button class="btn" onclick="loadInteractions()">Load Interactions</button>
+            <div id="interactionsContainer">
+                <div class="loading">No interactions loaded.</div>
+            </div>
+        </div>
+
+        <!-- Analytics Card -->
+        <div class="card">
+            <h2>📊 User Analytics</h2>
+            <button class="btn" onclick="loadAnalytics()">Load Analytics</button>
+            <div id="analyticsContainer">
+                <div class="loading">No analytics loaded.</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentUserId = null;
+
+        // API helper functions
+        function showStatus(elementId, message, isError = false) {
+            const element = document.getElementById(elementId);
+            element.innerHTML = `<div class="status ${isError ? 'error' : 'success'}">${message}</div>`;
+            setTimeout(() => {
+                element.innerHTML = '';
+            }, 5000);
+        }
+
+        async function apiCall(url, options = {}) {
+            try {
+                const response = await fetch(url, {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...options.headers
+                    },
+                    ...options
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.error || 'API call failed');
+                }
+                
+                return data;
+            } catch (error) {
+                console.error('API Error:', error);
+                throw error;
+            }
+        }
+
+        // User management functions
+        async function createUser() {
+            const username = document.getElementById('username').value;
+            const email = document.getElementById('email').value;
+            
+            if (!username) {
+                showStatus('userStatus', 'Username is required', true);
+                return;
+            }
+
+            try {
+                const user = await apiCall('/api/users', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        username: username,
+                        email: email || null,
+                        data_sharing_consent: true,
+                        learning_enabled: true
+                    })
+                });
+
+                currentUserId = user.user_id;
+                showStatus('userStatus', `User created successfully! ID: ${user.user_id}`);
+                displayCurrentUser(user);
+                
+                // Clear form
+                document.getElementById('username').value = '';
+                document.getElementById('email').value = '';
+                
+            } catch (error) {
+                showStatus('userStatus', `Error creating user: ${error.message}`, true);
+            }
+        }
+
+        async function loadUser() {
+            const username = document.getElementById('username').value;
+            
+            if (!username) {
+                showStatus('userStatus', 'Username is required', true);
+                return;
+            }
+
+            try {
+                // For demo purposes, we'll assume user ID 1
+                // In a real app, you'd search by username
+                const userId = 1;
+                const user = await apiCall(`/api/users/${userId}`);
+                
+                currentUserId = user.user_id;
+                showStatus('userStatus', `User loaded successfully!`);
+                displayCurrentUser(user);
+                
+            } catch (error) {
+                showStatus('userStatus', `Error loading user: ${error.message}`, true);
+            }
+        }
+
+        function displayCurrentUser(user) {
+            const userDiv = document.getElementById('currentUser');
+            const userInfo = document.getElementById('userInfo');
+            
+            userInfo.innerHTML = `
+                <p><strong>ID:</strong> ${user.user_id}</p>
+                <p><strong>Username:</strong> ${user.username}</p>
+                <p><strong>Email:</strong> ${user.email || 'Not provided'}</p>
+                <p><strong>Learning Enabled:</strong> ${user.learning_enabled ? 'Yes' : 'No'}</p>
+                <p><strong>Member Since:</strong> ${new Date(user.created_at).toLocaleDateString()}</p>
+            `;
+            
+            userDiv.style.display = 'block';
+        }
+
+        // Interaction functions
+        async function recordInteraction() {
+            if (!currentUserId) {
+                showStatus('interactionStatus', 'Please create or load a user first', true);
+                return;
+            }
+
+            const type = document.getElementById('interactionType').value;
+            const content = document.getElementById('interactionContent').value;
+            
+            if (!content) {
+                showStatus('interactionStatus', 'Content is required', true);
+                return;
+            }
+
+            try {
+                const result = await apiCall(`/api/users/${currentUserId}/interactions`, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        type: type,
+                        content: content,
+                        source: 'web'
+                    })
+                });
+
+                showStatus('interactionStatus', 'Interaction recorded successfully!');
+                document.getElementById('interactionContent').value = '';
+                
+            } catch (error) {
+                showStatus('interactionStatus', `Error recording interaction: ${error.message}`, true);
+            }
+        }
+
+        async function triggerLearning() {
+            if (!currentUserId) {
+                showStatus('interactionStatus', 'Please create or load a user first', true);
+                return;
+            }
+
+            try {
+                const result = await apiCall(`/api/users/${currentUserId}/learn`, {
+                    method: 'POST'
+                });
+
+                showStatus('interactionStatus', 
+                    `Learning completed! Processed ${result.processed_interactions} interactions, learned ${result.new_facts} new facts`);
+                
+                // Auto-refresh facts
+                loadFacts();
+                
+            } catch (error) {
+                showStatus('interactionStatus', `Error triggering learning: ${error.message}`, true);
+            }
+        }
+
+        // Facts functions
+        async function loadFacts(category = null) {
+            if (!currentUserId) {
+                document.getElementById('factsContainer').innerHTML = 
+                    '<div class="loading">Please create or load a user first.</div>';
+                return;
+            }
+
+            try {
+                const url = `/api/users/${currentUserId}/facts${category ? `?category=${category}` : ''}`;
+                const data = await apiCall(url);
+                
+                displayFacts(data.facts);
+                
+            } catch (error) {
+                document.getElementById('factsContainer').innerHTML = 
+                    `<div class="status error">Error loading facts: ${error.message}</div>`;
+            }
+        }
+
+        function displayFacts(facts) {
+            const container = document.getElementById('factsContainer');
+            
+            if (facts.length === 0) {
+                container.innerHTML = '<div class="loading">No facts learned yet.</div>';
+                return;
+            }
+
+            const factsHtml = facts.map(fact => `
+                <div class="fact-item">
+                    <div>
+                        <span class="fact-category">${fact.category}</span>
+                        <span class="confidence-badge confidence-${fact.confidence_level}">${fact.confidence_level}</span>
+                    </div>
+                    <h4>${fact.fact_key}</h4>
+                    <p>${fact.fact_value}</p>
+                    <small>
+                        Evidence: ${fact.evidence_count} | 
+                        Method: ${fact.learning_method} | 
+                        Last Updated: ${new Date(fact.last_updated).toLocaleDateString()}
+                        ${fact.user_confirmed ? ' ✅ Confirmed' : ''}
+                    </small>
+                </div>
+            `).join('');
+            
+            container.innerHTML = factsHtml;
+        }
+
+        // Interactions functions
+        async function loadInteractions() {
+            if (!currentUserId) {
+                document.getElementById('interactionsContainer').innerHTML = 
+                    '<div class="loading">Please create or load a user first.</div>';
+                return;
+            }
+
+            try {
+                const data = await apiCall(`/api/users/${currentUserId}/interactions?limit=20`);
+                displayInteractions(data.interactions);
+                
+            } catch (error) {
+                document.getElementById('interactionsContainer').innerHTML = 
+                    `<div class="status error">Error loading interactions: ${error.message}</div>`;
+            }
+        }
+
+        function displayInteractions(interactions) {
+            const container = document.getElementById('interactionsContainer');
+            
+            if (interactions.length === 0) {
+                container.innerHTML = '<div class="loading">No interactions found.</div>';
+                return;
+            }
+
+            const interactionsHtml = interactions.map(interaction => `
+                <div class="interaction-item">
+                    <div><strong>${interaction.type}</strong> - ${new Date(interaction.timestamp).toLocaleString()}</div>
+                    <p>${interaction.content}</p>
+                    <small>
+                        Sentiment: ${interaction.sentiment ? interaction.sentiment.toFixed(2) : 'N/A'} | 
+                        Intent: ${interaction.intent || 'N/A'}
+                        ${interaction.topics && interaction.topics.length > 0 ? ` | Topics: ${interaction.topics.join(', ')}` : ''}
+                    </small>
+                </div>
+            `).join('');
+            
+            container.innerHTML = interactionsHtml;
+        }
+
+        // Analytics functions
+        async function loadAnalytics() {
+            if (!currentUserId) {
+                document.getElementById('analyticsContainer').innerHTML = 
+                    '<div class="loading">Please create or load a user first.</div>';
+                return;
+            }
+
+            try {
+                const data = await apiCall(`/api/users/${currentUserId}/analytics`);
+                displayAnalytics(data);
+                
+            } catch (error) {
+                document.getElementById('analyticsContainer').innerHTML = 
+                    `<div class="status error">Error loading analytics: ${error.message}</div>`;
+            }
+        }
+
+        function displayAnalytics(analytics) {
+            const container = document.getElementById('analyticsContainer');
+            
+            const analyticsHtml = `
+                <div class="grid">
+                    <div>
+                        <h4>📈 Summary</h4>
+                        <p>Total Interactions: ${analytics.user_summary.total_interactions}</p>
+                        <p>Facts Learned: ${analytics.user_summary.total_facts_learned}</p>
+                        <p>Member Since: ${new Date(analytics.user_summary.member_since).toLocaleDateString()}</p>
+                        <p>Last Active: ${new Date(analytics.user_summary.last_active).toLocaleDateString()}</p>
+                    </div>
+                    <div>
+                        <h4>🎭 Interaction Stats</h4>
+                        <p>Average Sentiment: ${analytics.interaction_stats.average_sentiment.toFixed(2)}</p>
+                    </div>
+                </div>
+                <div>
+                    <h4>🧠 Learning Progress</h4>
+                    <div class="grid">
+                        ${Object.entries(analytics.learning_progress.facts_by_category).map(([category, count]) => 
+                            `<div class="fact-item"><strong>${category}:</strong> ${count} facts</div>`
+                        ).join('')}
+                    </div>
+                </div>
+            `;
+            
+            container.innerHTML = analyticsHtml;
+        }
+
+        // Auto-load demo user on page load
+        window.addEventListener('load', function() {
+            // Try to load the demo user
+            setTimeout(() => {
+                currentUserId = 1;
+                loadUser().catch(() => {
+                    // If demo user doesn't exist, show instructions
+                    showStatus('userStatus', 'Create a new user to get started!');
+                });
+            }, 1000);
+        });
+    </script>
+</body>
+</html>
