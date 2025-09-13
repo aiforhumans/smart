@@ -4,8 +4,12 @@ Main Flask application for the AI User Learning System
 
 import os
 import logging
-from datetime import datetime
-from flask import Flask, request, jsonify, render_template
+import time
+import json
+from datetime import datetime, timedelta
+from functools import wraps
+from collections import defaultdict
+from flask import Flask, request, jsonify, render_template, Response, stream_template
 from flask_cors import CORS
 from werkzeug.exceptions import BadRequest, NotFound, InternalServerError
 
@@ -22,11 +26,89 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
 
+# Webhook configuration
+WEBHOOK_API_KEY = os.getenv('WEBHOOK_API_KEY', 'dev-webhook-key-change-in-production')
+RATE_LIMIT_WINDOW = 300  # 5 minutes
+RATE_LIMIT_MAX_REQUESTS = 100  # requests per window
+
+# Rate limiting storage (in production, use Redis)
+rate_limit_store = defaultdict(list)
+
 # Enable CORS for cross-origin requests
 CORS(app)
 
 # Initialize learning engine
 learning_engine = LearningEngine()
+
+
+# =============================================================================
+# AUTHENTICATION AND RATE LIMITING MIDDLEWARE
+# =============================================================================
+
+def webhook_auth_required(f):
+    """Decorator for webhook authentication"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        auth_header = request.headers.get('Authorization')
+        api_key = request.headers.get('X-API-Key')
+        
+        # Check Bearer token
+        if auth_header and auth_header.startswith('Bearer '):
+            token = auth_header.split(' ')[1]
+            if token == WEBHOOK_API_KEY:
+                return f(*args, **kwargs)
+        
+        # Check API key header
+        if api_key == WEBHOOK_API_KEY:
+            return f(*args, **kwargs)
+        
+        # Allow development mode without auth
+        if WEBHOOK_API_KEY == 'dev-webhook-key-change-in-production':
+            logger.warning("Using development webhook key - set WEBHOOK_API_KEY in production!")
+            return f(*args, **kwargs)
+        
+        return jsonify({'error': 'Authentication required'}), 401
+    
+    return decorated_function
+
+
+def rate_limit(max_requests=None, window=None):
+    """Rate limiting decorator"""
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            # Get client identifier
+            client_ip = request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr)
+            api_key = request.headers.get('X-API-Key', 'anonymous')
+            client_id = f"{client_ip}:{api_key}"
+            
+            # Use provided limits or defaults
+            limit = max_requests or RATE_LIMIT_MAX_REQUESTS
+            time_window = window or RATE_LIMIT_WINDOW
+            
+            current_time = time.time()
+            client_requests = rate_limit_store[client_id]
+            
+            # Clean old requests outside the window
+            client_requests[:] = [req_time for req_time in client_requests 
+                                if current_time - req_time < time_window]
+            
+            # Check if limit exceeded
+            if len(client_requests) >= limit:
+                return jsonify({
+                    'error': 'Rate limit exceeded',
+                    'limit': limit,
+                    'window': time_window,
+                    'retry_after': time_window
+                }), 429
+            
+            # Add current request
+            client_requests.append(current_time)
+            
+            return f(*args, **kwargs)
+        
+        return decorated_function
+    return decorator
 
 
 @app.errorhandler(400)
@@ -35,7 +117,466 @@ def bad_request(error):
 
 @app.errorhandler(404)
 def not_found(error):
-    return jsonify({'error': 'Not found', 'message': str(error)}), 404
+    return jsonify({'error': 'Analytics not found'}), 404
+
+
+# =============================================================================
+# WEBHOOK/SDK ENDPOINTS FOR CHATBOT INTEGRATION
+# =============================================================================
+
+@app.route('/webhook/chat/message', methods=['POST'])
+@webhook_auth_required
+@rate_limit(max_requests=50, window=300)  # 50 requests per 5 minutes
+def webhook_chat_message():
+    """
+    Webhook endpoint for chatbots to log interactions and get instant insights
+    
+    Expected payload:
+    {
+        "user_id": "user123",
+        "message": "I love playing guitar",
+        "response": "That's great! What type of music do you like?",
+        "session_id": "optional_session_id",
+        "metadata": {"source": "gradio", "model": "llama-2"}
+    }
+    """
+    try:
+        data = request.json
+        
+        # Validate required fields
+        if not data or 'user_id' not in data or 'message' not in data:
+            return jsonify({
+                'error': 'Missing required fields: user_id, message'
+            }), 400
+        
+        user_identifier = data['user_id']
+        user_message = data['message']
+        bot_response = data.get('response', '')
+        session_id = data.get('session_id')
+        metadata = data.get('metadata', {})
+        
+        with db_manager.get_session() as session:
+            user_repo = UserRepository(session)
+            interaction_repo = InteractionRepository(session)
+            
+            # Find or create user
+            user = user_repo.get_user_by_username(user_identifier)
+            if not user:
+                user = user_repo.create_user(
+                    username=user_identifier,
+                    email=f"{user_identifier}@chatbot.local"
+                )
+                session.commit()
+            
+            # Log user message
+            user_interaction = interaction_repo.create_interaction(
+                user_id=user.id,
+                content=user_message,
+                interaction_type=InteractionType.MESSAGE,
+                metadata=metadata,
+                session_id=session_id
+            )
+            
+            # Log bot response if provided
+            if bot_response:
+                bot_interaction = interaction_repo.create_interaction(
+                    user_id=user.id,
+                    content=bot_response,
+                    interaction_type=InteractionType.BOT_RESPONSE,
+                    metadata=metadata,
+                    session_id=session_id
+                )
+            
+            session.commit()
+            
+            # Trigger AI learning
+            try:
+                recent_interactions = interaction_repo.get_user_interactions(
+                    user.id, limit=20
+                )
+                learning_result = learning_engine.process_user_interactions(
+                    user.id, recent_interactions
+                )
+                
+                # Store any new facts
+                fact_repo = LearnedFactRepository(session)
+                for fact_data in learning_result.new_facts:
+                    fact_repo.create_fact(
+                        user_id=user.id,
+                        category=fact_data.get('category'),
+                        fact_type=fact_data.get('fact_type'),
+                        fact_key=fact_data.get('fact_key'),
+                        fact_value=fact_data.get('fact_value'),
+                        confidence_level=fact_data.get('confidence_level'),
+                        evidence_count=fact_data.get('evidence_count', 1),
+                        learning_method=fact_data.get('learning_method')
+                    )
+                session.commit()
+                
+            except Exception as e:
+                logger.error(f"Learning error: {e}")
+                # Continue even if learning fails
+            
+            return jsonify({
+                'success': True,
+                'user_id': user.id,
+                'interaction_id': user_interaction.id,
+                'learned_facts_count': len(learning_result.new_facts) if 'learning_result' in locals() else 0,
+                'message': 'Interaction logged and processed'
+            })
+            
+    except Exception as e:
+        logger.error(f"Webhook error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/webhook/chat/insights/<user_identifier>', methods=['GET'])
+@webhook_auth_required
+@rate_limit(max_requests=100, window=300)  # 100 requests per 5 minutes
+def webhook_get_insights(user_identifier):
+    """
+    Get user insights and facts for chatbot personalization
+    
+    Query parameters:
+    - categories: comma-separated list (e.g., "interests,behavior")
+    - limit: max number of facts to return
+    - confidence: minimum confidence level (high, medium, low)
+    """
+    try:
+        # Query parameters
+        categories = request.args.get('categories', '').split(',') if request.args.get('categories') else None
+        limit = int(request.args.get('limit', 10))
+        min_confidence = request.args.get('confidence', 'low')
+        
+        with db_manager.get_session() as session:
+            user_repo = UserRepository(session)
+            fact_repo = LearnedFactRepository(session)
+            interaction_repo = InteractionRepository(session)
+            
+            # Find user
+            user = user_repo.get_user_by_username(user_identifier)
+            if not user:
+                return jsonify({
+                    'error': f'User {user_identifier} not found'
+                }), 404
+            
+            # Get user facts
+            facts = fact_repo.get_user_facts(
+                user.id,
+                categories=categories,
+                min_confidence=min_confidence,
+                limit=limit
+            )
+            
+            # Get recent interactions for context
+            recent_interactions = interaction_repo.get_user_interactions(
+                user.id, limit=5
+            )
+            
+            # Get user analytics
+            analytics = user_repo.get_user_analytics(user.id)
+            
+            return jsonify({
+                'user_id': user.id,
+                'username': user.username,
+                'facts': [
+                    {
+                        'category': fact.category,
+                        'type': fact.fact_type,
+                        'key': fact.fact_key,
+                        'value': fact.fact_value,
+                        'confidence': fact.confidence_level,
+                        'evidence_count': fact.evidence_count,
+                        'last_updated': fact.updated_at.isoformat() if fact.updated_at else None
+                    }
+                    for fact in facts
+                ],
+                'recent_interactions': [
+                    {
+                        'content': interaction.content,
+                        'type': interaction.interaction_type,
+                        'sentiment': interaction.sentiment,
+                        'topics': interaction.topics,
+                        'timestamp': interaction.timestamp.isoformat()
+                    }
+                    for interaction in recent_interactions
+                ],
+                'analytics': analytics,
+                'suggestions': [
+                    f"User shows interest in {fact.fact_value}" 
+                    for fact in facts 
+                    if fact.category == 'interests'
+                ][:3]
+            })
+            
+    except Exception as e:
+        logger.error(f"Insights webhook error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/webhook/chat/bulk', methods=['POST'])
+@webhook_auth_required
+@rate_limit(max_requests=10, window=300)  # 10 bulk uploads per 5 minutes
+def webhook_bulk_interactions():
+    """
+    Bulk upload interactions for batch processing
+    
+    Expected payload:
+    {
+        "user_id": "user123",
+        "interactions": [
+            {"message": "Hello", "timestamp": "2025-01-01T12:00:00Z"},
+            {"message": "I like music", "timestamp": "2025-01-01T12:01:00Z"}
+        ]
+    }
+    """
+    try:
+        data = request.json
+        
+        if not data or 'user_id' not in data or 'interactions' not in data:
+            return jsonify({
+                'error': 'Missing required fields: user_id, interactions'
+            }), 400
+        
+        user_identifier = data['user_id']
+        interactions_data = data['interactions']
+        
+        with db_manager.get_session() as session:
+            user_repo = UserRepository(session)
+            interaction_repo = InteractionRepository(session)
+            
+            # Find or create user
+            user = user_repo.get_user_by_username(user_identifier)
+            if not user:
+                user = user_repo.create_user(
+                    username=user_identifier,
+                    email=f"{user_identifier}@chatbot.local"
+                )
+                session.commit()
+            
+            # Create interactions
+            created_interactions = []
+            for interaction_data in interactions_data:
+                interaction = interaction_repo.create_interaction(
+                    user_id=user.id,
+                    content=interaction_data['message'],
+                    interaction_type=InteractionType.MESSAGE,
+                    metadata=interaction_data.get('metadata', {}),
+                    session_id=interaction_data.get('session_id')
+                )
+                created_interactions.append(interaction)
+            
+            session.commit()
+            
+            # Trigger learning on all interactions
+            all_interactions = interaction_repo.get_user_interactions(user.id)
+            learning_result = learning_engine.process_user_interactions(
+                user.id, all_interactions
+            )
+            
+            # Store new facts
+            fact_repo = LearnedFactRepository(session)
+            for fact_data in learning_result.new_facts:
+                fact_repo.create_fact(
+                    user_id=user.id,
+                    category=fact_data.get('category'),
+                    fact_type=fact_data.get('fact_type'),
+                    fact_key=fact_data.get('fact_key'),
+                    fact_value=fact_data.get('fact_value'),
+                    confidence_level=fact_data.get('confidence_level'),
+                    evidence_count=fact_data.get('evidence_count', 1),
+                    learning_method=fact_data.get('learning_method')
+                )
+            session.commit()
+            
+            return jsonify({
+                'success': True,
+                'user_id': user.id,
+                'interactions_created': len(created_interactions),
+                'facts_learned': len(learning_result.new_facts),
+                'processing_time_ms': learning_result.processing_time_ms
+            })
+            
+    except Exception as e:
+        logger.error(f"Bulk webhook error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/webhook/stream/insights/<user_identifier>')
+@webhook_auth_required
+@rate_limit(max_requests=10, window=300)  # 10 stream connections per 5 minutes
+def stream_user_insights(user_identifier):
+    """
+    Server-Sent Events stream for real-time user insights
+    
+    Usage:
+        EventSource('/webhook/stream/insights/user123')
+    """
+    def generate_insights():
+        """Generate real-time insights stream"""
+        last_fact_count = 0
+        last_interaction_count = 0
+        
+        while True:
+            try:
+                with db_manager.get_session() as session:
+                    user_repo = UserRepository(session)
+                    fact_repo = LearnedFactRepository(session)
+                    interaction_repo = InteractionRepository(session)
+                    
+                    # Find user
+                    user = user_repo.get_user_by_username(user_identifier)
+                    if not user:
+                        yield f"data: {json.dumps({'error': 'User not found'})}\n\n"
+                        break
+                    
+                    # Get current counts
+                    current_facts = fact_repo.get_user_facts(user.id, limit=100)
+                    current_interactions = interaction_repo.get_user_interactions(user.id, limit=1)
+                    
+                    fact_count = len(current_facts)
+                    interaction_count = len(current_interactions)
+                    
+                    # Check if there are updates
+                    if fact_count != last_fact_count or interaction_count != last_interaction_count:
+                        # Get latest insights
+                        recent_facts = current_facts[:5]  # Latest 5 facts
+                        analytics = user_repo.get_user_analytics(user.id)
+                        
+                        update_data = {
+                            'timestamp': datetime.utcnow().isoformat(),
+                            'user_id': user.id,
+                            'username': user.username,
+                            'updates': {
+                                'new_facts': fact_count - last_fact_count,
+                                'new_interactions': interaction_count - last_interaction_count
+                            },
+                            'latest_facts': [
+                                {
+                                    'category': fact.category,
+                                    'value': fact.fact_value,
+                                    'confidence': fact.confidence_level,
+                                    'created_at': fact.created_at.isoformat() if fact.created_at else None
+                                }
+                                for fact in recent_facts
+                            ],
+                            'analytics': analytics
+                        }
+                        
+                        yield f"data: {json.dumps(update_data)}\n\n"
+                        
+                        last_fact_count = fact_count
+                        last_interaction_count = interaction_count
+                    
+                    # Wait before next check
+                    time.sleep(2)
+                    
+            except Exception as e:
+                logger.error(f"Stream error: {e}")
+                yield f"data: {json.dumps({'error': str(e)})}\n\n"
+                break
+    
+    return Response(
+        generate_insights(),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Headers': 'Cache-Control'
+        }
+    )
+
+
+@app.route('/webhook/stream/learning/<user_identifier>')
+@webhook_auth_required
+@rate_limit(max_requests=5, window=300)  # 5 learning streams per 5 minutes
+def stream_learning_process(user_identifier):
+    """
+    Server-Sent Events stream for real-time learning process updates
+    
+    This endpoint streams live updates during the AI learning process
+    """
+    def generate_learning_updates():
+        """Generate real-time learning process updates"""
+        try:
+            with db_manager.get_session() as session:
+                user_repo = UserRepository(session)
+                interaction_repo = InteractionRepository(session)
+                
+                # Find user
+                user = user_repo.get_user_by_username(user_identifier)
+                if not user:
+                    yield f"data: {json.dumps({'error': 'User not found'})}\n\n"
+                    return
+                
+                # Start learning process
+                yield f"data: {json.dumps({'status': 'starting', 'message': 'Initializing learning process...'})}\n\n"
+                
+                # Get user interactions
+                interactions = interaction_repo.get_user_interactions(user.id)
+                
+                yield f"data: {json.dumps({'status': 'analyzing', 'message': f'Analyzing {len(interactions)} interactions...'})}\n\n"
+                
+                # Process interactions with the learning engine
+                learning_result = learning_engine.process_user_interactions(user.id, interactions)
+                
+                yield f"data: {json.dumps({'status': 'learning', 'message': f'Extracted {len(learning_result.new_facts)} new insights...'})}\n\n"
+                
+                # Store new facts
+                if learning_result.new_facts:
+                    fact_repo = LearnedFactRepository(session)
+                    stored_facts = []
+                    
+                    for i, fact_data in enumerate(learning_result.new_facts):
+                        fact = fact_repo.create_fact(
+                            user_id=user.id,
+                            category=fact_data.get('category'),
+                            fact_type=fact_data.get('fact_type'),
+                            fact_key=fact_data.get('fact_key'),
+                            fact_value=fact_data.get('fact_value'),
+                            confidence_level=fact_data.get('confidence_level'),
+                            evidence_count=fact_data.get('evidence_count', 1),
+                            learning_method=fact_data.get('learning_method')
+                        )
+                        stored_facts.append(fact)
+                        
+                        # Stream each fact as it's stored
+                        yield f"data: {json.dumps({'status': 'storing', 'message': f'Stored fact: {fact.fact_value}', 'fact': {'category': fact.category, 'value': fact.fact_value, 'confidence': fact.confidence_level}})}\n\n"
+                    
+                    session.commit()
+                
+                # Final summary
+                final_result = {
+                    'status': 'completed',
+                    'message': 'Learning process completed successfully',
+                    'summary': {
+                        'interactions_processed': learning_result.processing_time_ms,
+                        'facts_learned': len(learning_result.new_facts),
+                        'processing_time_ms': learning_result.processing_time_ms,
+                        'errors': learning_result.errors
+                    }
+                }
+                
+                yield f"data: {json.dumps(final_result)}\n\n"
+                
+        except Exception as e:
+            logger.error(f"Learning stream error: {e}")
+            yield f"data: {json.dumps({'status': 'error', 'message': str(e)})}\n\n"
+    
+    return Response(
+        generate_learning_updates(),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Headers': 'Cache-Control'
+        }
+    )
+
+
+# Frontend routes
 
 @app.errorhandler(500)
 def internal_error(error):
