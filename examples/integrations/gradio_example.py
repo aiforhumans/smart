@@ -174,7 +174,7 @@ def create_gradio_interface():
         
         with gr.Row():
             with gr.Column(scale=2):
-                chatbot_ui = gr.Chatbot(label="Chat", height=400)
+                chatbot_ui = gr.Chatbot(label="Chat", height=400, type="messages")
                 with gr.Row():
                     msg = gr.Textbox(
                         label="Message",

@@ -172,7 +172,7 @@ def webhook_chat_message():
             user_interaction = interaction_repo.create_interaction(
                 user_id=user.id,
                 content=user_message,
-                interaction_type=InteractionType.MESSAGE,
+                interaction_type=InteractionType.MESSAGE.value,
                 metadata=metadata,
                 session_id=session_id
             )
@@ -182,7 +182,7 @@ def webhook_chat_message():
                 bot_interaction = interaction_repo.create_interaction(
                     user_id=user.id,
                     content=bot_response,
-                    interaction_type=InteractionType.BOT_RESPONSE,
+                    interaction_type=InteractionType.MESSAGE.value,
                     metadata=metadata,
                     session_id=session_id
                 )
@@ -261,20 +261,31 @@ def webhook_get_insights(user_identifier):
                 }), 404
             
             # Get user facts
-            facts = fact_repo.get_user_facts(
+            all_facts = fact_repo.get_user_facts(
                 user.id,
-                categories=categories,
-                min_confidence=min_confidence,
-                limit=limit
+                category=categories
             )
+            
+            # Apply confidence filtering
+            if min_confidence != 'low':
+                confidence_map = {'medium': 0.5, 'high': 0.8}
+                min_conf_value = confidence_map.get(min_confidence, 0.0)
+                all_facts = [f for f in all_facts if f.confidence_level >= min_conf_value]
+            
+            # Apply limit
+            facts = all_facts[:limit] if limit else all_facts
             
             # Get recent interactions for context
             recent_interactions = interaction_repo.get_user_interactions(
                 user.id, limit=5
             )
             
-            # Get user analytics
-            analytics = user_repo.get_user_analytics(user.id)
+            # Get user analytics - compute basic stats
+            total_interactions = len(interaction_repo.get_user_interactions(user.id, limit=1000))
+            analytics = {
+                'total_interactions': total_interactions,
+                'facts_learned': len(facts)
+            }
             
             return jsonify({
                 'user_id': user.id,
@@ -360,7 +371,7 @@ def webhook_bulk_interactions():
                 interaction = interaction_repo.create_interaction(
                     user_id=user.id,
                     content=interaction_data['message'],
-                    interaction_type=InteractionType.MESSAGE,
+                    interaction_type=InteractionType.MESSAGE.value,
                     metadata=interaction_data.get('metadata', {}),
                     session_id=interaction_data.get('session_id')
                 )
@@ -441,7 +452,10 @@ def stream_user_insights(user_identifier):
                     if fact_count != last_fact_count or interaction_count != last_interaction_count:
                         # Get latest insights
                         recent_facts = current_facts[:5]  # Latest 5 facts
-                        analytics = user_repo.get_user_analytics(user.id)
+                        analytics = {
+                            'total_interactions': interaction_count,
+                            'facts_learned': fact_count
+                        }
                         
                         update_data = {
                             'timestamp': datetime.utcnow().isoformat(),
